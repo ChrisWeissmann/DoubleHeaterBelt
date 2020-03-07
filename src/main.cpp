@@ -2,16 +2,22 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+#define ARRAY_SIZE(arr)     (sizeof(arr) / sizeof((arr)[0]))
+#define DEBUG
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
-int SwitchPin = 2;
-int thermistors[2] = {A0, A11};
-int ThermistorPin = A0;
+int switchPins[2] = {16, 26};
+int thermistors[2] = {4, 0};
+float temperatures[2];
+float readTemperature(int position);
+void globalReadTemperatures();
+
+
 
 enum STATE {
-    HEATING,
-    COOLING
+    COOLING,
+    HEATING
 };
 
 STATE state[] = { COOLING, COOLING };
@@ -62,11 +68,15 @@ void updateDisplay()
     int seperatorX = 52;
     display.drawLine(seperatorX,0,seperatorX,64, WHITE);
 
-    for (int i=0; i<sizeof(thermistors); i++) {
+    for (int i=0; i<ARRAY_SIZE(thermistors); i++) {
         display.setCursor(i * 70, 20); //TODO: Fix flex width
         display.setTextSize(3);
-        display.print(readTemperature(i));
-        display.display();
+        display.print((int)temperatures[i]);
+
+        #ifdef DEBUG
+        Serial.print("[");Serial.print(i);Serial.print("] state is ");
+        Serial.println(state[i]);
+        #endif
 
         // Draw Status
         switch (state[i])
@@ -75,7 +85,7 @@ void updateDisplay()
             display.setTextSize(1);
             display.setTextColor(WHITE);
             display.setCursor(64 * i, 51); //TODO: Fix dynamic lenght
-            display.println("HEATING");
+            display.print("HEATING");
             break;
         case COOLING:
             // what should be displayed if cooling
@@ -85,23 +95,31 @@ void updateDisplay()
             break;
         }
     }
-
+    // Draw Display.
+    display.display();
 }
 
+
+/* Steinhard Calculation */
 float readTemperature(int position)
 {
     float logR2, R2, T;
     int Vo;
-    #ifndef DEBUG:
-    Vo = analogRead(ThermistorPin);
-    R2 = R1 * (1023.0 / (float)Vo - 1.0);
+
+    Vo = analogRead(thermistors[position]);
+    R2 = R1 * (4095.0 / (float)Vo - 1.0);
     logR2 = log(R2);
     T = (1.0 / (c1 + c2*logR2 + c3*logR2*logR2*logR2));
     T = T - 273.15;
-    T = (T * 9.0)/ 5.0 + 32.0;
-    #else
-    T = random(100);
+    // T = (T * 9.0)/ 5.0 + 32.0;
+
+    #ifdef DEBUG
+    Serial.print("[");Serial.print(position);
+    Serial.print("] Analog read from GPIO ");
+    Serial.print(thermistors[position]);
+    Serial.print(": "); Serial.println(Vo);
     #endif
+
     return T;
 }
 
@@ -109,20 +127,20 @@ float readTemperature(int position)
 
 float runPositionTemp(int position)
 {
-    float temp = readTemperature(position);
-    Serial.println("Temp: ");
-    Serial.print(temp);
-    Serial.print(" Position: ");
-    Serial.println(position);
+    float temp = temperatures[position];
+    Serial.print("[");
+    Serial.print(position);Serial.print("] Temp: ");
+    Serial.println(temp);
+
     if (temp > 65.0)
     {
-        digitalWrite(SwitchPin, LOW);
+        digitalWrite(switchPins[position], LOW);
         Serial.println("COOLING");
         state[position] = COOLING;
     }
     else
     {
-        digitalWrite(SwitchPin, HIGH);
+        digitalWrite(switchPins[position], HIGH);
         Serial.println("HEATING!");
         state[position] = HEATING;
     }
@@ -132,7 +150,8 @@ float runPositionTemp(int position)
 void setup()
 {
     Serial.begin(115200);
-    pinMode(SwitchPin, OUTPUT);
+    pinMode(switchPins[0], OUTPUT);
+    pinMode(switchPins[1], OUTPUT);
     // Start I2C Communication SDA = 5 and SCL = 4 on Wemos Lolin32 ESP32 with built-in SSD1306 OLED
     Wire.begin(5, 4);
 
@@ -146,15 +165,20 @@ void setup()
     randomSeed(42);
 }
 
+void globalReadTemperatures(){
+    for (int i=0; i < ARRAY_SIZE(temperatures); i++) {
+        Serial.print("int i in global read: ");
+        Serial.println(i);
+        temperatures[i] = readTemperature(i);
+    }
+}
+
 void loop()
 {
+    globalReadTemperatures();  // read temperatures here
     updateDisplay();
-
-    float tempFront = runPositionTemp(0);
-    float tempBack = runPositionTemp(1);
-    Serial.print("Temperature front: ");
-    Serial.println(tempFront);
-    Serial.print("Temperature back: ");
-    Serial.println(tempBack);
+    // do a control cycle per sensor.
+    runPositionTemp(0);
+    runPositionTemp(1);
     delay(5000);
 }
